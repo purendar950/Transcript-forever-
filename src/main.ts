@@ -182,6 +182,11 @@ export async function handler(request: Request, info?: ConnInfo): Promise<Respon
     return json({ formats: FORMATS, default: "json" });
   }
 
+  if (path === "/api/probe") {
+    const { probe } = await import("./probe.ts");
+    return json({ attempts: await probe() });
+  }
+
   if (!authorized(request, url)) {
     return json({
       success: false,
