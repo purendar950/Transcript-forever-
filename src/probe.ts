@@ -107,6 +107,32 @@ export async function probe(url?: URL): Promise<Attempt[]> {
   const poToken = url?.searchParams.get("po_token") ?? "";
 
   const extras: Promise<Attempt>[] = [];
+
+  const captionUrl = url?.searchParams.get("caption_url") ?? "";
+  if (captionUrl) {
+    extras.push(guard("signed timedtext (url supplied)", async () => {
+      const target = new URL(captionUrl);
+      target.searchParams.set("fmt", "json3");
+      const response = await fetch(target, { headers: { "User-Agent": ANDROID_UA } });
+      const text = await response.text();
+      return {
+        label: "signed timedtext (url supplied)",
+        http: response.status,
+        sample: `${text.length} bytes: ${text.slice(0, 90)}`,
+      };
+    }));
+  }
+
+  extras.push(guard("deployment identity", async () => {
+    const response = await fetch("https://api.ipify.org?format=json");
+    const body = await response.text();
+    const region = typeof Deno !== "undefined" ? Deno.env.get("DENO_REGION") ?? "unset" : "n/a";
+    return {
+      label: "deployment identity",
+      http: response.status,
+      sample: `region=${region} ${body.slice(0, 60)}`,
+    };
+  }));
   if (visitorData && poToken) {
     extras.push(innertube(
       "innertube WEB + poToken",
