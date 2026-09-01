@@ -1,5 +1,12 @@
+# Optional second free host: Cloudflare Workers.
+# Deploy with:  npx wrangler@3 deploy
 name = "transcript-forever"
-main = "worker.js"
-compatibility_date = "2024-01-01"
+main = "src/main.ts"
+compatibility_date = "2025-03-10"
+compatibility_flags = ["nodejs_compat"]
 
-# BOT_TOKEN is set via: wrangler secret put BOT_TOKEN
+[vars]
+CACHE_TTL_SECONDS = "3600"
+RATE_LIMIT = "60"
+RATE_WINDOW_SECONDS = "60"
+# API_KEY is a secret: npx wrangler secret put API_KEY
