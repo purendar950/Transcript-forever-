@@ -8,6 +8,15 @@
  */
 const VIDEO = "jNQXAC9IVRw";
 const PLAYER = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
+const INNERTUBE_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
+const ANDROID_CLIENT = {
+  clientName: "ANDROID",
+  clientVersion: "20.10.38",
+  androidSdkVersion: 34,
+  osName: "Android",
+  osVersion: "14",
+  platform: "MOBILE",
+};
 
 interface Attempt {
   label: string;
@@ -38,9 +47,10 @@ function innertube(
   client: Record<string, unknown>,
   extra: Record<string, unknown> = {},
   headers: Record<string, string> = {},
+  endpoint: string = PLAYER,
 ): Promise<Attempt> {
   return guard(label, async () => {
-    const response = await fetch(PLAYER, {
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -124,16 +134,25 @@ export async function probe(url?: URL): Promise<Attempt[]> {
     ));
   }
 
+  const hosts: [string, string][] = [
+    [
+      "youtubei.googleapis.com",
+      `https://youtubei.googleapis.com/youtubei/v1/player?key=${INNERTUBE_KEY}&prettyPrint=false`,
+    ],
+    [
+      "youtube-nocookie.com",
+      "https://www.youtube-nocookie.com/youtubei/v1/player?prettyPrint=false",
+    ],
+    ["m.youtube.com", "https://m.youtube.com/youtubei/v1/player?prettyPrint=false"],
+    ["music.youtube.com", "https://music.youtube.com/youtubei/v1/player?prettyPrint=false"],
+  ];
+  for (const [name, endpoint] of hosts) {
+    extras.push(innertube(`ANDROID via ${name}`, ANDROID_UA, ANDROID_CLIENT, {}, {}, endpoint));
+  }
+
   const attempts = await Promise.all([
     ...extras,
-    innertube("innertube ANDROID", ANDROID_UA, {
-      clientName: "ANDROID",
-      clientVersion: "20.10.38",
-      androidSdkVersion: 34,
-      osName: "Android",
-      osVersion: "14",
-      platform: "MOBILE",
-    }),
+    innertube("innertube ANDROID", ANDROID_UA, ANDROID_CLIENT),
     innertube(
       "innertube WEB + consent cookie",
       CHROME_UA,
