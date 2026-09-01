@@ -8,9 +8,6 @@
     "dev": "wrangler dev",
     "tail": "wrangler tail"
   },
-  "dependencies": {
-    "youtube-transcript": "^1.2.1"
-  },
   "devDependencies": {
     "wrangler": "^3.0.0"
   }
