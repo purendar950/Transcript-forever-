@@ -63,21 +63,40 @@ async function fetchTranscript(videoId: string): Promise<{ segments: Seg[]; lang
   const xml = await capRes.text();
   if (!xml || xml.length < 10) throw new Error("Caption response empty — YouTube may be rate limiting");
 
-  // Step 3: Parse XML (supports both <text> and <p> formats)
+  // Step 3: Parse XML (supports all YouTube XML formats)
   const segments: Seg[] = [];
   
-  // Format 1: <text start="seconds" dur="seconds">text</text>
+  // Strategy 1: <text start="s" dur="s">text</text> (classic)
   let regex = /<text start="([^"]*)" dur="([^"]*)">([^<]*)<\/text>/g;
   let match;
   while ((match = regex.exec(xml)) !== null) {
-    segments.push({ text: decodeXml(match[3]), start: parseFloat(match[1]), duration: parseFloat(match[2]) });
+    const text = decodeXml(match[3]);
+    if (text) segments.push({ text, start: parseFloat(match[1]), duration: parseFloat(match[2]) });
   }
 
-  // Format 2: <p t="milliseconds" d="milliseconds">text</p>
+  // Strategy 2: <p t="ms" d="ms">text</p> (srv3 format)
   if (segments.length === 0) {
-    regex = /<p t="([^"]*)" d="([^"]*)">([^<]*)<\/p>/g;
+    regex = /<p t="([^"]*)"(?:\s+d="([^"]*)")?[^>]*>([^<]*(?:<\/[^>]*>[^<]*)*)<\/p>/g;
     while ((match = regex.exec(xml)) !== null) {
-      segments.push({ text: decodeXml(match[3]), start: parseInt(match[1]) / 1000, duration: parseInt(match[2]) / 1000 });
+      const inner = match[3];
+      // Strip all tags to get text
+      const text = decodeXml(inner.replace(/<[^>]*>/g, ' '));
+      if (text) segments.push({ text, start: parseInt(match[1]) / 1000, duration: parseInt(match[2] || '3000') / 1000 });
+    }
+  }
+
+  // Strategy 3: <p t="ms"> with <s> children
+  if (segments.length === 0) {
+    // Extract all <p> blocks, then extract text from <s> children
+    const pBlocks = xml.match(/<p[^>]*t="[^"]*"[^>]*>[\s\S]*?<\/p>/g) || [];
+    for (const block of pBlocks) {
+      const tMatch = block.match(/t="([^"]*)"/);
+      const dMatch = block.match(/d="([^"]*)"/);
+      // Get all text from <s> tags or raw text
+      const sTexts = (block.match(/<s[^>]*>([^<]*)<\/s>/g) || []).map(s => s.replace(/<[^>]*>/g, ''));
+      const rawText = sTexts.length > 0 ? sTexts.join('') : block.replace(/<[^>]*>/g, '');
+      const text = decodeXml(rawText);
+      if (text && tMatch) segments.push({ text, start: parseInt(tMatch[1]) / 1000, duration: parseInt(dMatch?.[1] || '3000') / 1000 });
     }
   }
 
