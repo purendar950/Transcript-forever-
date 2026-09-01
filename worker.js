@@ -7,16 +7,7 @@
  *   1. Telegram Bot — users send YouTube URLs, get transcripts
  *   2. HTTP API — other projects call GET/POST for transcripts
  *   3. Always-on — runs 24/7 on Cloudflare's edge network
- * 
- * API Endpoints:
- *   GET  /api/transcript?url=YOUTUBE_URL&format=plain
- *   GET  /api/transcript?url=YOUTUBE_URL&format=timestamps
- *   POST /api/transcript  { "url": "YOUTUBE_URL", "format": "plain" }
- *   GET  /api/health
- *   GET  /api/formats
- * 
- * Telegram:
- *   POST /webhook (Telegram sends updates here)
+ *   4. Transcript caching — avoids YouTube rate limits
  */
 
 import { YoutubeTranscript } from 'youtube-transcript';
@@ -28,6 +19,33 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   'Content-Type': 'application/json',
 };
+
+// ── In-Memory Cache ─────────────────────────────────────────
+// Cloudflare Workers have isolated caches, but we use a simple
+// Map per request. For persistent caching across requests,
+// we'll use the Cache API.
+const CACHE_TTL = 3600000; // 1 hour
+
+async function getCachedTranscript(videoId) {
+  const cacheKey = `transcript:${videoId}`;
+  const cache = caches.default;
+  const request = new Request(`https://cache/${cacheKey}`);
+  const cached = await cache.match(request);
+  if (cached) {
+    return await cached.json();
+  }
+  return null;
+}
+
+async function setCachedTranscript(videoId, data) {
+  const cacheKey = `transcript:${videoId}`;
+  const cache = caches.default;
+  const request = new Request(`https://cache/${cacheKey}`);
+  const response = new Response(JSON.stringify(data), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+  await cache.put(request, response);
+}
 
 // ── Transcript Engine ───────────────────────────────────────
 
@@ -42,12 +60,20 @@ function extractVideoId(text) {
 }
 
 async function fetchTranscript(videoId) {
+  // Check cache first
+  const cached = await getCachedTranscript(videoId);
+  if (cached) return cached;
+
   const raw = await YoutubeTranscript.fetchTranscript(videoId);
-  return raw.map((e) => ({
+  const data = raw.map((e) => ({
     text: e.text,
     start: e.offset / 1000,
     duration: (e.duration || 3000) / 1000,
   }));
+
+  // Cache for 1 hour
+  await setCachedTranscript(videoId, data);
+  return data;
 }
 
 function formatPlain(data) {
@@ -352,7 +378,7 @@ function handleApiHealth() {
   return new Response(JSON.stringify({
     status: 'ok',
     service: 'Transcript Forever',
-    version: '1.0.0',
+    version: '1.1.0',
     endpoints: {
       transcript: 'GET/POST /api/transcript?url=URL&format=plain',
       formats: 'GET /api/formats',
