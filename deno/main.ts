@@ -245,3 +245,4 @@ Deno.serve(async (req: Request) => {
 
   return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: CORS });
 });
+
