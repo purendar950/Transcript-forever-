@@ -18,6 +18,13 @@ function extractVideoId(text: string): string | null {
 
 interface Seg { text: string; start: number; duration: number; }
 
+function decodeXml(text: string): string {
+  return text
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/<[^>]*>/g, "").replace(/\n/g, " ").trim();
+}
+
 async function fetchTranscript(videoId: string): Promise<{ segments: Seg[]; language: string }> {
   // Step 1: InnerTube Android player API
   const res = await fetch("https://www.youtube.com/youtubei/v1/player?prettyPrint=false", {
@@ -56,15 +63,22 @@ async function fetchTranscript(videoId: string): Promise<{ segments: Seg[]; lang
   const xml = await capRes.text();
   if (!xml || xml.length < 10) throw new Error("Caption response empty — YouTube may be rate limiting");
 
-  // Step 3: Parse XML
+  // Step 3: Parse XML (supports both <text> and <p> formats)
   const segments: Seg[] = [];
-  const regex = /<text start="([^"]*)" dur="([^"]*)">([^<]*)<\/text>/g;
+  
+  // Format 1: <text start="seconds" dur="seconds">text</text>
+  let regex = /<text start="([^"]*)" dur="([^"]*)">([^<]*)<\/text>/g;
   let match;
   while ((match = regex.exec(xml)) !== null) {
-    const text = match[3]
-      .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
-    if (text) segments.push({ text, start: parseFloat(match[1]), duration: parseFloat(match[2]) });
+    segments.push({ text: decodeXml(match[3]), start: parseFloat(match[1]), duration: parseFloat(match[2]) });
+  }
+
+  // Format 2: <p t="milliseconds" d="milliseconds">text</p>
+  if (segments.length === 0) {
+    regex = /<p t="([^"]*)" d="([^"]*)">([^<]*)<\/p>/g;
+    while ((match = regex.exec(xml)) !== null) {
+      segments.push({ text: decodeXml(match[3]), start: parseInt(match[1]) / 1000, duration: parseInt(match[2]) / 1000 });
+    }
   }
 
   if (segments.length === 0) throw new Error("Transcript is empty");
@@ -198,7 +212,7 @@ Deno.serve(async (req: Request) => {
 
   // Webhook
   if (path === "/webhook" && req.method === "POST") {
-    if (!BOT_TOKEN) return new Response("No BOT_TOKEN", { status: 500 });
+    if (!BOT_TOKEN) return new Response(JSON.stringify({error:"No BOT_TOKEN configured"}), { status: 500, headers: CORS });
     try { const u = await req.json(); if (u.message?.text) await handleMessage(u.message); if (u.callback_query) await handleCallback(u.callback_query); return new Response("OK", { status: 200 }); }
     catch { return new Response("Error", { status: 500 }); }
   }
