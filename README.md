@@ -15,8 +15,9 @@ same source file).
 
 ```bash
 deno task dev          # http://localhost:8000
-deno task test         # 37 tests
+deno task test         # 37 unit tests, network stubbed
 deno task check        # type check + fmt + lint
+deno task smoke        # end-to-end checks against a running server
 ```
 
 ```bash
@@ -32,17 +33,24 @@ Free tier: 1M requests/month, 100 GiB outbound, no cold-start billing, no card.
 **Option A — GitHub (auto-deploys on push)**
 
 1. Push to GitHub (`purendar950/Transcript-forever-`).
-2. Go to [dash.deno.com](https://dash.deno.com) → **New Project** → link the repo.
-3. Set entrypoint to `src/main.ts`, then **Deploy**.
+2. Go to [app.deno.com](https://app.deno.com) → **New App** → link the repo.
+3. Leave the build config empty. The `deploy` block in `deno.json` already sets the runtime to
+   dynamic with entrypoint `src/server.ts`, and source config wins over the dashboard.
 
 **Option B — CLI**
 
 ```bash
-deno install -Arf jsr:@deno/deployctl
-deployctl deploy --project=transcript-forever --prod --entrypoint=src/main.ts
+deno deploy        # same as: deno task deploy
 ```
 
-Your API is then live at `https://transcript-forever.deno.dev`.
+The app is live at `https://<app-slug>.<org-slug>.deno.net`, for example
+`https://transcript-forever.purendar950.deno.net`.
+
+Verify a deployment:
+
+```bash
+deno task smoke https://transcript-forever.purendar950.deno.net
+```
 
 ### Cloudflare Workers (optional backup)
 
@@ -118,7 +126,7 @@ Ready-made clients live in `clients/`.
 ```ts
 import { createTranscriptClient } from "./clients/transcript.ts";
 
-const yt = createTranscriptClient({ baseUrl: "https://transcript-forever.deno.dev" });
+const yt = createTranscriptClient({ baseUrl: "https://transcript-forever.purendar950.deno.net" });
 
 const text = await yt.text("https://youtu.be/jNQXAC9IVRw");
 const segments = await yt.segments("jNQXAC9IVRw", { lang: ["hi", "en"] });
@@ -136,7 +144,7 @@ const { transcript } = await res.json();
 ```python
 from clients.transcript import TranscriptClient
 
-yt = TranscriptClient("https://transcript-forever.deno.dev")
+yt = TranscriptClient("https://transcript-forever.purendar950.deno.net")
 print(yt.text("https://youtu.be/jNQXAC9IVRw"))
 ```
 
@@ -178,6 +186,7 @@ profiles in `src/youtube.ts` are the place to update.
 
 ```
 src/
+  server.ts     Deno.serve entrypoint used by Deno Deploy
   main.ts       HTTP router, auth, rate limit, cache wiring
   youtube.ts    InnerTube client + caption parsing
   formats.ts    plain / timestamps / paragraphs / srt / vtt / json renderers
@@ -189,4 +198,6 @@ src/
   landing.ts    self-documenting HTML page
 clients/        ready-to-use TS and Python clients
 tests/          unit + route tests (network stubbed)
+scripts/
+  smoke.ts      end-to-end check against a live URL
 ```

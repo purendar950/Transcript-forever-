@@ -2,12 +2,19 @@
   "name": "transcript-forever",
   "version": "1.0.0",
   "exports": "./src/main.ts",
+  "deploy": {
+    "runtime": {
+      "type": "dynamic",
+      "entrypoint": "src/server.ts"
+    }
+  },
   "tasks": {
-    "dev": "deno serve --allow-net --allow-env --watch --port 8000 src/main.ts",
-    "start": "deno serve --allow-net --allow-env --port 8000 src/main.ts",
+    "dev": "deno run --allow-net --allow-env --watch src/server.ts",
+    "start": "deno run --allow-net --allow-env src/server.ts",
     "test": "deno test --allow-net --allow-env",
-    "check": "deno check src/main.ts && deno fmt --check && deno lint",
-    "deploy": "deployctl deploy --prod --entrypoint=src/main.ts"
+    "smoke": "deno run --allow-net --allow-env scripts/smoke.ts",
+    "check": "deno check src/main.ts src/server.ts && deno fmt --check && deno lint",
+    "deploy": "deno deploy"
   },
   "fmt": {
     "lineWidth": 100,
