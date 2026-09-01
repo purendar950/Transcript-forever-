@@ -1,7 +1,10 @@
 /**
- * TEMPORARY diagnostic route. Datacenter IPs get different InnerTube treatment
- * than residential ones, so this reports what each strategy returns when run
- * from inside the deployment. Remove once a working strategy is picked.
+ * TEMPORARY diagnostic route.
+ *
+ * YouTube treats datacenter IPs differently from residential ones, so a
+ * strategy that works locally can still fail on Deno Deploy. This runs every
+ * candidate strategy from inside the deployment and reports what came back.
+ * Delete this file and its route once a working strategy is chosen.
  */
 const VIDEO = "jNQXAC9IVRw";
 const PLAYER = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
@@ -16,27 +19,27 @@ interface Attempt {
   error?: string;
 }
 
-async function visitorData(): Promise<string | null> {
+const CHROME_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+const ANDROID_UA = "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip";
+const GOOGLEBOT_UA = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
+
+async function guard(label: string, run: () => Promise<Attempt>): Promise<Attempt> {
   try {
-    const response = await fetch("https://www.youtube.com/sw.js_data", {
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
-    const parsed = JSON.parse((await response.text()).replace(/^\)\]\}'/, ""));
-    const value = parsed?.[0]?.[2]?.[0]?.[0]?.[13];
-    return typeof value === "string" ? value : null;
-  } catch {
-    return null;
+    return await run();
+  } catch (error) {
+    return { label, error: String(error).slice(0, 160) };
   }
 }
 
-async function player(
+function innertube(
   label: string,
   userAgent: string,
   client: Record<string, unknown>,
   extra: Record<string, unknown> = {},
   headers: Record<string, string> = {},
 ): Promise<Attempt> {
-  try {
+  return guard(label, async () => {
     const response = await fetch(PLAYER, {
       method: "POST",
       headers: {
@@ -62,163 +65,83 @@ async function player(
       status: body?.playabilityStatus?.status,
       reason: body?.playabilityStatus?.reason,
       tracks: tracks.length,
-      sample: tracks[0]?.baseUrl?.slice(0, 120),
     };
-  } catch (error) {
-    return { label, error: String(error) };
-  }
+  });
 }
 
-async function watchPage(): Promise<Attempt> {
-  try {
-    const response = await fetch(`https://www.youtube.com/watch?v=${VIDEO}&hl=en`, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-      },
-    });
+function scrape(label: string, url: string, headers: Record<string, string>): Promise<Attempt> {
+  return guard(label, async () => {
+    const response = await fetch(url, { headers });
     const html = await response.text();
     const match = html.match(/"captionTracks":(\[.*?\])/);
+    const count = match ? JSON.parse(match[1].replace(/\\u0026/g, "&")).length : 0;
     return {
-      label: "watch page scrape",
+      label,
       http: response.status,
-      tracks: match ? JSON.parse(match[1].replace(/\\u0026/g, "&")).length : 0,
-      sample: match ? match[1].slice(0, 120) : `html ${html.length} bytes`,
+      tracks: count,
+      sample: count > 0 ? "captionTracks present" : `no captionTracks in ${html.length} bytes`,
     };
-  } catch (error) {
-    return { label: "watch page scrape", error: String(error) };
-  }
+  });
 }
 
-async function timedText(): Promise<Attempt> {
-  try {
-    const response = await fetch(
-      `https://video.google.com/timedtext?lang=en&v=${VIDEO}&fmt=json3`,
-    );
+function json(label: string, url: string, init: RequestInit = {}): Promise<Attempt> {
+  return guard(label, async () => {
+    const response = await fetch(url, init);
     const body = await response.text();
-    return { label: "legacy timedtext", http: response.status, sample: body.slice(0, 120) };
-  } catch (error) {
-    return { label: "legacy timedtext", error: String(error) };
-  }
+    return { label, http: response.status, sample: body.slice(0, 180) };
+  });
 }
 
 export async function probe(): Promise<Attempt[]> {
-  const visitor = await visitorData();
-  const results: Attempt[] = [
-    { label: "visitorData", sample: visitor ? `${visitor.slice(0, 16)}...` : "none" },
-  ];
-
-  results.push(
-    await player(
-      "ANDROID",
-      "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip",
+  const attempts = await Promise.all([
+    innertube("innertube ANDROID", ANDROID_UA, {
+      clientName: "ANDROID",
+      clientVersion: "20.10.38",
+      androidSdkVersion: 34,
+      osName: "Android",
+      osVersion: "14",
+      platform: "MOBILE",
+    }),
+    innertube(
+      "innertube WEB + consent cookie",
+      CHROME_UA,
+      { clientName: "WEB", clientVersion: "2.20250101.00.00", platform: "DESKTOP" },
+      {},
+      { Cookie: "CONSENT=YES+cb; SOCS=CAISEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg" },
+    ),
+    scrape(
+      "watch page (chrome ua)",
+      `https://www.youtube.com/watch?v=${VIDEO}&hl=en&bpctr=9999999999`,
       {
-        clientName: "ANDROID",
-        clientVersion: "20.10.38",
-        androidSdkVersion: 34,
-        osName: "Android",
-        osVersion: "14",
-        platform: "MOBILE",
+        "User-Agent": CHROME_UA,
+        "Accept-Language": "en-US,en;q=0.9",
+        Cookie: "CONSENT=YES+cb; SOCS=CAISEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg",
       },
     ),
-  );
-
-  results.push(
-    await player(
-      "IOS",
-      "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X; en_US)",
-      {
-        clientName: "IOS",
-        clientVersion: "20.10.4",
-        deviceMake: "Apple",
-        deviceModel: "iPhone16,2",
-        osName: "iPhone",
-        osVersion: "18.3.2.22D82",
-        platform: "MOBILE",
-      },
+    scrape("watch page (googlebot ua)", `https://www.youtube.com/watch?v=${VIDEO}&hl=en`, {
+      "User-Agent": GOOGLEBOT_UA,
+      "Accept-Language": "en-US,en;q=0.9",
+    }),
+    scrape("embed page", `https://www.youtube.com/embed/${VIDEO}?hl=en`, {
+      "User-Agent": CHROME_UA,
+      "Accept-Language": "en-US,en;q=0.9",
+    }),
+    json("invidious nadeko captions list", `https://inv.nadeko.net/api/v1/captions/${VIDEO}`),
+    json(
+      "invidious nadeko vtt",
+      `https://inv.nadeko.net/api/v1/captions/${VIDEO}?label=English`,
     ),
-  );
-
-  results.push(
-    await player(
-      "ANDROID_VR",
-      "com.google.android.apps.youtube.vr.oculus/1.62.27 (Linux; U; Android 12L) gzip",
-      {
-        clientName: "ANDROID_VR",
-        clientVersion: "1.62.27",
-        androidSdkVersion: 32,
-        deviceMake: "Oculus",
-        deviceModel: "Quest 3",
-        osName: "Android",
-        osVersion: "12L",
-      },
+    json("piped private.coffee", `https://api.piped.private.coffee/streams/${VIDEO}`),
+    json("kome.ai relay", "https://kome.ai/api/transcript", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://kome.ai" },
+      body: JSON.stringify({ video_id: VIDEO, format: true }),
+    }),
+    json(
+      "unsigned timedtext",
+      `https://www.youtube.com/api/timedtext?v=${VIDEO}&lang=en&fmt=json3`,
     ),
-  );
+  ]);
 
-  if (visitor) {
-    results.push(
-      await player(
-        "ANDROID + visitorData",
-        "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip",
-        {
-          clientName: "ANDROID",
-          clientVersion: "20.10.38",
-          androidSdkVersion: 34,
-          osName: "Android",
-          osVersion: "14",
-          platform: "MOBILE",
-          visitorData: visitor,
-        },
-        {},
-        { "X-Goog-Visitor-Id": visitor },
-      ),
-    );
-
-    results.push(
-      await player(
-        "WEB + visitorData",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        {
-          clientName: "WEB",
-          clientVersion: "2.20250101.00.00",
-          platform: "DESKTOP",
-          visitorData: visitor,
-        },
-        {},
-        { "X-Goog-Visitor-Id": visitor },
-      ),
-    );
-  }
-
-  results.push(
-    await player(
-      "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
-      "Mozilla/5.0 (PlayStation; PlayStation 4/12.00) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15",
-      { clientName: "TVHTML5_SIMPLY_EMBEDDED_PLAYER", clientVersion: "2.0", platform: "TV" },
-      { thirdParty: { embedUrl: "https://www.youtube.com" } },
-    ),
-  );
-
-  results.push(
-    await player(
-      "WEB_EMBEDDED_PLAYER",
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-      { clientName: "WEB_EMBEDDED_PLAYER", clientVersion: "1.20250101.00.00", platform: "DESKTOP" },
-      { thirdParty: { embedUrl: "https://www.youtube.com" } },
-    ),
-  );
-
-  results.push(
-    await player(
-      "MWEB",
-      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
-      { clientName: "MWEB", clientVersion: "2.20250101.00.00", platform: "MOBILE" },
-    ),
-  );
-
-  results.push(await watchPage());
-  results.push(await timedText());
-
-  return results;
+  return attempts;
 }
