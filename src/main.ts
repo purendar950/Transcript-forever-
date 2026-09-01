@@ -184,7 +184,7 @@ export async function handler(request: Request, info?: ConnInfo): Promise<Respon
 
   if (path === "/api/probe") {
     const { probe } = await import("./probe.ts");
-    return json({ attempts: await probe() });
+    return json({ attempts: await probe(url) });
   }
 
   if (!authorized(request, url)) {

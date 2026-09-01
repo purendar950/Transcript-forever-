@@ -92,8 +92,40 @@ function json(label: string, url: string, init: RequestInit = {}): Promise<Attem
   });
 }
 
-export async function probe(): Promise<Attempt[]> {
+export async function probe(url?: URL): Promise<Attempt[]> {
+  const visitorData = url?.searchParams.get("visitor_data") ?? "";
+  const poToken = url?.searchParams.get("po_token") ?? "";
+
+  const extras: Promise<Attempt>[] = [];
+  if (visitorData && poToken) {
+    extras.push(innertube(
+      "innertube WEB + poToken",
+      CHROME_UA,
+      {
+        clientName: "WEB",
+        clientVersion: "2.20250101.00.00",
+        platform: "DESKTOP",
+        visitorData,
+      },
+      { serviceIntegrityDimensions: { poToken } },
+      { "X-Goog-Visitor-Id": visitorData },
+    ));
+    extras.push(innertube(
+      "innertube MWEB + poToken",
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+      {
+        clientName: "MWEB",
+        clientVersion: "2.20250101.00.00",
+        platform: "MOBILE",
+        visitorData,
+      },
+      { serviceIntegrityDimensions: { poToken } },
+      { "X-Goog-Visitor-Id": visitorData },
+    ));
+  }
+
   const attempts = await Promise.all([
+    ...extras,
     innertube("innertube ANDROID", ANDROID_UA, {
       clientName: "ANDROID",
       clientVersion: "20.10.38",
